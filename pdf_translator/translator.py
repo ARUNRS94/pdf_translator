@@ -83,7 +83,12 @@ def translate_lines(lines: List[str], target_language: str) -> List[str]:
                 temperature=0,
             )
             parsed = _parse_translation_json(raw, len(lines))
+<<<<<<< codex/design-pdf-translator-application-2fog9z
             return [_apply_source_format_guards(src, out) for src, out in zip(lines, parsed)]
+=======
+            guarded = [_apply_source_format_guards(src, out) for src, out in zip(lines, parsed)]
+            return [_normalize_month_names(v, target_language) for v in guarded]
+>>>>>>> main
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             logger.warning("Translation attempt %s/%s failed: %s", attempt, config.MAX_RETRIES, exc)
@@ -102,6 +107,10 @@ def _apply_source_format_guards(source: str, translated: str) -> str:
     trailing = len(src) - len(src.rstrip(" "))
     out = (" " * leading) + out.strip() + (" " * trailing)
 
+<<<<<<< codex/design-pdf-translator-application-2fog9z
+=======
+    # Preserve TOC dotted leaders + trailing page numbers, e.g. "Title.............23"
+>>>>>>> main
     m = re.match(r"^(.*?)(\.{3,})(\s*\d+)\s*$", src)
     if m:
         dots = m.group(2)
@@ -109,12 +118,44 @@ def _apply_source_format_guards(source: str, translated: str) -> str:
         left = re.sub(r"\.{3,}\s*\d+\s*$", "", out).rstrip()
         out = f"{left}{dots}{page}"
 
+<<<<<<< codex/design-pdf-translator-application-2fog9z
+=======
+    # Preserve strings that are numbers/symbol-only.
+>>>>>>> main
     if re.fullmatch(r"[\d\W_]+", src):
         return src
 
     return out
 
 
+<<<<<<< codex/design-pdf-translator-application-2fog9z
+=======
+def _normalize_month_names(text: str, target_language: str) -> str:
+    if target_language.strip().lower() != "french":
+        return text
+
+    month_map = {
+        "january": "janvier",
+        "february": "février",
+        "march": "mars",
+        "april": "avril",
+        "may": "mai",
+        "june": "juin",
+        "july": "juillet",
+        "august": "août",
+        "september": "septembre",
+        "october": "octobre",
+        "november": "novembre",
+        "december": "décembre",
+    }
+
+    out = text
+    for en, fr in month_map.items():
+        out = re.sub(rf"\b{en}\b", fr, out, flags=re.IGNORECASE)
+    return out
+
+
+>>>>>>> main
 def _parse_translation_json(raw: str, expected_size: int) -> List[str]:
     cleaned = raw.strip()
     if cleaned.startswith("```"):

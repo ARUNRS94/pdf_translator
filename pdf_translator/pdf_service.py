@@ -85,6 +85,7 @@ def _validate_max_pages(max_pages: Optional[int], total_pages: int) -> Optional[
     return min(max_pages, total_pages)
 
 
+<<<<<<< codex/design-pdf-translator-application-2fog9z
 def _looks_like_section_heading(text: str) -> bool:
     t = text.strip()
     return bool(re.match(r"^\d+(\.\d+)*\s+", t))
@@ -93,6 +94,11 @@ def _looks_like_section_heading(text: str) -> bool:
 def _font_candidates(span: TextSpan, text: str) -> list[str]:
     name = (span.font or "").lower()
     bold = ("bold" in name) or bool(span.flags & 16) or _looks_like_section_heading(text)
+=======
+def _font_candidates(span: TextSpan) -> list[str]:
+    name = (span.font or "").lower()
+    bold = ("bold" in name) or bool(span.flags & 16)
+>>>>>>> main
     italic = ("italic" in name or "oblique" in name) or bool(span.flags & 2)
 
     styled = "helv"
@@ -104,12 +110,17 @@ def _font_candidates(span: TextSpan, text: str) -> list[str]:
         styled = "helvI"
 
     out = []
+<<<<<<< codex/design-pdf-translator-application-2fog9z
     for f in [span.font, styled, "helv"]:
+=======
+    for f in [span.font, styled, "helvB", "helv"]:
+>>>>>>> main
         if f and f not in out:
             out.append(f)
     return out
 
 
+<<<<<<< codex/design-pdf-translator-application-2fog9z
 def _fit_fontsize_for_width(text: str, font: str, preferred_size: float, max_width: float) -> float:
     try:
         width = fitz.get_text_length(text, fontname=font, fontsize=preferred_size)
@@ -124,6 +135,8 @@ def _fit_fontsize_for_width(text: str, font: str, preferred_size: float, max_wid
         return preferred_size
 
 
+=======
+>>>>>>> main
 def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, size: float, color: tuple[float, float, float]) -> bool:
     m = re.match(r"^(.*?)(\.{3,})(\s*\d+)\s*$", text)
     if not m:
@@ -135,7 +148,11 @@ def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, siz
     try:
         num_w = fitz.get_text_length(page_num, fontname=font, fontsize=size)
         x_num = max(rect.x0 + rect.width * 0.65, rect.x1 - num_w)
+<<<<<<< codex/design-pdf-translator-application-2fog9z
         baseline = rect.y0 + max(size, rect.height * 0.8)
+=======
+        baseline = rect.y1 - max(0.5, rect.height * 0.2)
+>>>>>>> main
 
         page.insert_text(
             fitz.Point(x_num, baseline),
@@ -146,10 +163,16 @@ def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, siz
             overlay=True,
         )
 
+<<<<<<< codex/design-pdf-translator-application-2fog9z
         title_size = _fit_fontsize_for_width(title, font, size, max(5.0, (x_num - rect.x0) * 0.72))
         title_w = fitz.get_text_length(title, fontname=font, fontsize=title_size)
         dots_start = rect.x0 + title_w + 2
         dots_end = x_num - 2
+=======
+        title_w = fitz.get_text_length(title, fontname=font, fontsize=size)
+        dots_start = rect.x0 + min(title_w + 1, rect.width * 0.75)
+        dots_end = x_num - 1
+>>>>>>> main
         if dots_end > dots_start:
             dot_w = max(1.0, fitz.get_text_length(".", fontname=font, fontsize=size))
             dot_count = int((dots_end - dots_start) / dot_w)
@@ -167,7 +190,11 @@ def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, siz
             fitz.Point(rect.x0, baseline),
             title,
             fontname=font,
+<<<<<<< codex/design-pdf-translator-application-2fog9z
             fontsize=title_size,
+=======
+            fontsize=size,
+>>>>>>> main
             color=color,
             overlay=True,
         )
@@ -178,6 +205,7 @@ def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, siz
 
 
 def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpan) -> bool:
+<<<<<<< codex/design-pdf-translator-application-2fog9z
     candidate_fonts = _font_candidates(span, text)
     base_size = span.size
     color = _int_to_rgb(span.color)
@@ -186,10 +214,18 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
         size_fit = _fit_fontsize_for_width(text, font, base_size, max(5.0, rect.width - 1))
         candidate_sizes = [size_fit, max(5.0, size_fit - 0.5), max(5.0, size_fit - 1.0)]
 
+=======
+    candidate_fonts = _font_candidates(span)
+    candidate_sizes = [span.size, max(6.0, span.size - 0.5), max(5.0, span.size - 1.0)]
+    color = _int_to_rgb(span.color)
+
+    for font in candidate_fonts:
+>>>>>>> main
         for size in candidate_sizes:
             if _render_toc_line(page, rect, text, font, size, color):
                 return True
 
+<<<<<<< codex/design-pdf-translator-application-2fog9z
             # For large headings, force single-line baseline render first to avoid overlap with underline.
             if span.size >= 16:
                 try:
@@ -206,6 +242,8 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
                 except Exception:
                     pass
 
+=======
+>>>>>>> main
             try:
                 rc = page.insert_textbox(
                     rect,
@@ -222,7 +260,11 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
                 logger.debug("Textbox render failed (font=%s size=%s): %s", font, size, exc)
 
             try:
+<<<<<<< codex/design-pdf-translator-application-2fog9z
                 baseline = fitz.Point(rect.x0, rect.y0 + max(size * 0.95, rect.height * 0.78))
+=======
+                baseline = fitz.Point(rect.x0, rect.y0 + max(size, rect.height * 0.8))
+>>>>>>> main
                 page.insert_text(
                     baseline,
                     text,
