@@ -84,6 +84,47 @@ def _validate_max_pages(max_pages: Optional[int], total_pages: int) -> Optional[
     return min(max_pages, total_pages)
 
 
+def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpan) -> bool:
+    """Render text into the original span rectangle.
+
+    Returns True when any text is successfully drawn.
+    """
+    candidate_fonts = [span.font, "helv"]
+    candidate_sizes = [span.size, max(6.0, span.size - 1), max(5.0, span.size - 2)]
+
+    for font in candidate_fonts:
+        for size in candidate_sizes:
+            try:
+                rc = page.insert_textbox(
+                    rect,
+                    text,
+                    fontname=font,
+                    fontsize=size,
+                    color=_int_to_rgb(span.color),
+                    align=fitz.TEXT_ALIGN_LEFT,
+                    overlay=True,
+                )
+                if rc >= 0:
+                    return True
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Textbox render failed (font=%s size=%s): %s", font, size, exc)
+
+    # Final hard fallback: place text baseline near top-left so box is never left blank.
+    try:
+        page.insert_text(
+            fitz.Point(rect.x0, rect.y0 + max(5.0, span.size)),
+            text,
+            fontname="helv",
+            fontsize=max(5.0, span.size),
+            color=_int_to_rgb(span.color),
+            overlay=True,
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Final fallback render failed: %s", exc)
+        return False
+
+
 def translate_pdf(pdf_bytes: bytes, target_language: str, max_pages: Optional[int] = None) -> bytes:
     spans, source_doc = extract_text_spans(pdf_bytes)
     page_limit = _validate_max_pages(max_pages, source_doc.page_count)
@@ -129,27 +170,13 @@ def translate_pdf(pdf_bytes: bytes, target_language: str, max_pages: Optional[in
 
         page = output_doc[span.page_number]
         rect = fitz.Rect(span.bbox)
-        page.add_redact_annot(rect, fill=(1, 1, 1))
-        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-        try:
-            page.insert_textbox(
-                rect,
-                translated_by_index[i],
-                fontname=span.font,
-                fontsize=span.size,
-                color=_int_to_rgb(span.color),
-                align=fitz.TEXT_ALIGN_LEFT,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to render translated span; fallback to original: %s", exc)
-            page.insert_textbox(
-                rect,
-                span.text,
-                fontsize=span.size,
-                color=_int_to_rgb(span.color),
-                align=fitz.TEXT_ALIGN_LEFT,
-            )
+        # Cover original source text first, then draw translated text above.
+        page.draw_rect(rect, color=None, fill=(1, 1, 1), overlay=True)
+
+        rendered = _render_span_text(page, rect, translated_by_index[i], span)
+        if not rendered:
+            logger.warning("Failed to render translated span; preserving source text visible.")
 
     out_bytes = output_doc.tobytes(garbage=4, deflate=True)
     output_doc.close()
