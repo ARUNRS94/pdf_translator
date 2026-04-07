@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from typing import List
 
@@ -54,9 +55,10 @@ def _system_prompt(target_language: str) -> str:
     return (
         "You are a strict translation engine for enterprise PDFs. "
         f"Translate content into {target_language}. "
-        "Rules: preserve order, keep one output line per input line, "
-        "do not alter numbers/dates/symbols/references/URLs/emails/file paths/code, "
-        "no summarization, no omissions, no additions."
+        "Rules: preserve order, keep one output line per input line, preserve leading spaces, "
+        "trailing spaces, tab-like spacing, dotted leaders, and trailing page numbers exactly. "
+        "Do not alter numbers/dates/symbols/references/URLs/emails/file paths/code. "
+        "No summarization, no omissions, no additions."
     )
 
 
@@ -66,7 +68,7 @@ def translate_lines(lines: List[str], target_language: str) -> List[str]:
 
     user_prompt = (
         "Translate each line and return ONLY valid JSON with schema "
-        '{"translations":[{"i":0,"text":"..."}]}. '\
+        '{"translations":[{"i":0,"text":"..."}]}. '
         "Indices must match input exactly.\n"
     )
     for i, line in enumerate(lines):
@@ -81,7 +83,7 @@ def translate_lines(lines: List[str], target_language: str) -> List[str]:
                 temperature=0,
             )
             parsed = _parse_translation_json(raw, len(lines))
-            return parsed
+            return [_apply_source_format_guards(src, out) for src, out in zip(lines, parsed)]
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             logger.warning("Translation attempt %s/%s failed: %s", attempt, config.MAX_RETRIES, exc)
@@ -90,6 +92,29 @@ def translate_lines(lines: List[str], target_language: str) -> List[str]:
 
     logger.error("All translation retries exhausted, using original text. Error: %s", last_error)
     return lines
+
+
+def _apply_source_format_guards(source: str, translated: str) -> str:
+    src = source
+    out = translated
+
+    leading = len(src) - len(src.lstrip(" "))
+    trailing = len(src) - len(src.rstrip(" "))
+    out = (" " * leading) + out.strip() + (" " * trailing)
+
+    # Preserve TOC dotted leaders + trailing page numbers, e.g. "Title.............23"
+    m = re.match(r"^(.*?)(\.{3,})(\s*\d+)\s*$", src)
+    if m:
+        dots = m.group(2)
+        page = m.group(3)
+        left = re.sub(r"\.{3,}\s*\d+\s*$", "", out).rstrip()
+        out = f"{left}{dots}{page}"
+
+    # Preserve strings that are numbers/symbol-only.
+    if re.fullmatch(r"[\d\W_]+", src):
+        return src
+
+    return out
 
 
 def _parse_translation_json(raw: str, expected_size: int) -> List[str]:

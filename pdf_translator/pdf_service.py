@@ -84,16 +84,47 @@ def _validate_max_pages(max_pages: Optional[int], total_pages: int) -> Optional[
     return min(max_pages, total_pages)
 
 
-def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpan) -> bool:
-    """Render text into the original span rectangle.
+def _font_candidates(span: TextSpan) -> list[str]:
+    name = (span.font or "").lower()
+    bold = ("bold" in name) or bool(span.flags & 16)
+    italic = ("italic" in name or "oblique" in name) or bool(span.flags & 2)
 
-    Returns True when any text is successfully drawn.
-    """
-    candidate_fonts = [span.font, "helv"]
-    candidate_sizes = [span.size, max(6.0, span.size - 1), max(5.0, span.size - 2)]
+    styled = "helv"
+    if bold and italic:
+        styled = "helvBI"
+    elif bold:
+        styled = "helvB"
+    elif italic:
+        styled = "helvI"
+
+    out = []
+    for f in [span.font, styled, "helv"]:
+        if f and f not in out:
+            out.append(f)
+    return out
+
+
+def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpan) -> bool:
+    candidate_fonts = _font_candidates(span)
+    candidate_sizes = [span.size, max(6.0, span.size - 0.5), max(5.0, span.size - 1.0)]
 
     for font in candidate_fonts:
         for size in candidate_sizes:
+            try:
+                # Insert at baseline point first to preserve exact left alignment.
+                baseline = fitz.Point(rect.x0, rect.y1 - max(0.5, rect.height * 0.15))
+                page.insert_text(
+                    baseline,
+                    text,
+                    fontname=font,
+                    fontsize=size,
+                    color=_int_to_rgb(span.color),
+                    overlay=True,
+                )
+                return True
+            except Exception:
+                pass
+
             try:
                 rc = page.insert_textbox(
                     rect,
@@ -109,20 +140,7 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Textbox render failed (font=%s size=%s): %s", font, size, exc)
 
-    # Final hard fallback: place text baseline near top-left so box is never left blank.
-    try:
-        page.insert_text(
-            fitz.Point(rect.x0, rect.y0 + max(5.0, span.size)),
-            text,
-            fontname="helv",
-            fontsize=max(5.0, span.size),
-            color=_int_to_rgb(span.color),
-            overlay=True,
-        )
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Final fallback render failed: %s", exc)
-        return False
+    return False
 
 
 def translate_pdf(pdf_bytes: bytes, target_language: str, max_pages: Optional[int] = None) -> bytes:
@@ -170,13 +188,11 @@ def translate_pdf(pdf_bytes: bytes, target_language: str, max_pages: Optional[in
 
         page = output_doc[span.page_number]
         rect = fitz.Rect(span.bbox)
-
-        # Cover original source text first, then draw translated text above.
         page.draw_rect(rect, color=None, fill=(1, 1, 1), overlay=True)
 
-        rendered = _render_span_text(page, rect, translated_by_index[i], span)
-        if not rendered:
-            logger.warning("Failed to render translated span; preserving source text visible.")
+        if not _render_span_text(page, rect, translated_by_index[i], span):
+            logger.warning("Failed to render translated span; keeping source text for span %s.", i)
+            _render_span_text(page, rect, span.text, span)
 
     out_bytes = output_doc.tobytes(garbage=4, deflate=True)
     output_doc.close()
