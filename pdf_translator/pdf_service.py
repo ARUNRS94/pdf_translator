@@ -141,6 +141,18 @@ def _fit_fontsize_for_width(text: str, font: str, preferred_size: float, max_wid
         return preferred_size
 
 
+
+
+def _truncate_to_width(text: str, font: str, size: float, max_width: float) -> str:
+    if fitz.get_text_length(text, fontname=font, fontsize=size) <= max_width:
+        return text
+
+    out = text
+    while out and fitz.get_text_length(out, fontname=font, fontsize=size) > max_width:
+        out = out[:-1]
+    return out.rstrip()
+
+
 def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, size: float, color: tuple[float, float, float], faux_bold: bool = False) -> bool:
     m = re.match(r"^(.*?)(\.{3,})(\s*\d+)\s*$", text)
     if not m:
@@ -156,8 +168,10 @@ def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, siz
 
         _draw_text(page, fitz.Point(x_num, baseline), page_num, font, size, color, faux_bold=faux_bold)
 
-        title_size = _fit_fontsize_for_width(title, font, size, max(5.0, (x_num - rect.x0) * 0.72))
-        title_w = fitz.get_text_length(title, fontname=font, fontsize=title_size)
+        title_space = max(5.0, x_num - rect.x0 - 6)
+        title_size = _fit_fontsize_for_width(title, font, size, title_space)
+        title_text = _truncate_to_width(title, font, title_size, title_space)
+        title_w = fitz.get_text_length(title_text, fontname=font, fontsize=title_size)
         dots_start = rect.x0 + title_w + 2
         dots_end = x_num - 2
         if dots_end > dots_start:
@@ -166,7 +180,7 @@ def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, siz
             if dot_count > 2:
                 _draw_text(page, fitz.Point(dots_start, baseline), "." * dot_count, font, size, color, faux_bold=faux_bold)
 
-        _draw_text(page, fitz.Point(rect.x0, baseline), title, font, title_size, color, faux_bold=faux_bold)
+        _draw_text(page, fitz.Point(rect.x0, baseline), title_text, font, title_size, color, faux_bold=faux_bold)
         return True
     except Exception as exc:  # noqa: BLE001
         logger.debug("TOC render fallback failed: %s", exc)
@@ -212,12 +226,14 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Textbox render failed (font=%s size=%s): %s", font, size, exc)
 
-            try:
-                baseline = fitz.Point(rect.x0, rect.y0 + max(size * 0.95, rect.height * 0.78))
-                _draw_text(page, baseline, text, font, size, color, faux_bold=emphasis)
-                return True
-            except Exception:
-                pass
+            # Avoid overflow artifacts in normal body text: if textbox fails, caller will fallback to source text.
+            if span.size >= 16 or emphasis:
+                try:
+                    baseline = fitz.Point(rect.x0, rect.y0 + max(size * 0.95, rect.height * 0.78))
+                    _draw_text(page, baseline, text, font, size, color, faux_bold=emphasis)
+                    return True
+                except Exception:
+                    pass
 
     return False
 
