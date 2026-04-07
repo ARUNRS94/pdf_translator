@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import List, Optional
 
 import fitz
@@ -104,26 +105,67 @@ def _font_candidates(span: TextSpan) -> list[str]:
     return out
 
 
+def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, size: float, color: tuple[float, float, float]) -> bool:
+    m = re.match(r"^(.*?)(\.{3,})(\s*\d+)\s*$", text)
+    if not m:
+        return False
+
+    title = m.group(1).rstrip()
+    page_num = m.group(3).strip()
+
+    try:
+        num_w = fitz.get_text_length(page_num, fontname=font, fontsize=size)
+        x_num = max(rect.x0 + rect.width * 0.65, rect.x1 - num_w)
+        baseline = rect.y1 - max(0.5, rect.height * 0.2)
+
+        page.insert_text(
+            fitz.Point(x_num, baseline),
+            page_num,
+            fontname=font,
+            fontsize=size,
+            color=color,
+            overlay=True,
+        )
+
+        title_w = fitz.get_text_length(title, fontname=font, fontsize=size)
+        dots_start = rect.x0 + min(title_w + 1, rect.width * 0.75)
+        dots_end = x_num - 1
+        if dots_end > dots_start:
+            dot_w = max(1.0, fitz.get_text_length(".", fontname=font, fontsize=size))
+            dot_count = int((dots_end - dots_start) / dot_w)
+            if dot_count > 2:
+                page.insert_text(
+                    fitz.Point(dots_start, baseline),
+                    "." * dot_count,
+                    fontname=font,
+                    fontsize=size,
+                    color=color,
+                    overlay=True,
+                )
+
+        page.insert_text(
+            fitz.Point(rect.x0, baseline),
+            title,
+            fontname=font,
+            fontsize=size,
+            color=color,
+            overlay=True,
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("TOC render fallback failed: %s", exc)
+        return False
+
+
 def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpan) -> bool:
     candidate_fonts = _font_candidates(span)
     candidate_sizes = [span.size, max(6.0, span.size - 0.5), max(5.0, span.size - 1.0)]
+    color = _int_to_rgb(span.color)
 
     for font in candidate_fonts:
         for size in candidate_sizes:
-            try:
-                # Insert at baseline point first to preserve exact left alignment.
-                baseline = fitz.Point(rect.x0, rect.y1 - max(0.5, rect.height * 0.15))
-                page.insert_text(
-                    baseline,
-                    text,
-                    fontname=font,
-                    fontsize=size,
-                    color=_int_to_rgb(span.color),
-                    overlay=True,
-                )
+            if _render_toc_line(page, rect, text, font, size, color):
                 return True
-            except Exception:
-                pass
 
             try:
                 rc = page.insert_textbox(
@@ -131,7 +173,7 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
                     text,
                     fontname=font,
                     fontsize=size,
-                    color=_int_to_rgb(span.color),
+                    color=color,
                     align=fitz.TEXT_ALIGN_LEFT,
                     overlay=True,
                 )
@@ -139,6 +181,20 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
                     return True
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Textbox render failed (font=%s size=%s): %s", font, size, exc)
+
+            try:
+                baseline = fitz.Point(rect.x0, rect.y1 - max(0.5, rect.height * 0.2))
+                page.insert_text(
+                    baseline,
+                    text,
+                    fontname=font,
+                    fontsize=size,
+                    color=color,
+                    overlay=True,
+                )
+                return True
+            except Exception:
+                pass
 
     return False
 
