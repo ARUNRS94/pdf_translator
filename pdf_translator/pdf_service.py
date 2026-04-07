@@ -120,6 +120,13 @@ def _font_candidates(span: TextSpan, text: str) -> list[str]:
     return out
 
 
+
+
+def _draw_text(page: fitz.Page, point: fitz.Point, text: str, font: str, size: float, color: tuple[float, float, float], faux_bold: bool = False) -> None:
+    page.insert_text(point, text, fontname=font, fontsize=size, color=color, overlay=True)
+    if faux_bold:
+        page.insert_text(fitz.Point(point.x + 0.2, point.y), text, fontname=font, fontsize=size, color=color, overlay=True)
+
 def _fit_fontsize_for_width(text: str, font: str, preferred_size: float, max_width: float) -> float:
     try:
         width = fitz.get_text_length(text, fontname=font, fontsize=preferred_size)
@@ -134,7 +141,7 @@ def _fit_fontsize_for_width(text: str, font: str, preferred_size: float, max_wid
         return preferred_size
 
 
-def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, size: float, color: tuple[float, float, float]) -> bool:
+def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, size: float, color: tuple[float, float, float], faux_bold: bool = False) -> bool:
     m = re.match(r"^(.*?)(\.{3,})(\s*\d+)\s*$", text)
     if not m:
         return False
@@ -147,14 +154,7 @@ def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, siz
         x_num = max(rect.x0 + rect.width * 0.65, rect.x1 - num_w)
         baseline = rect.y0 + max(size, rect.height * 0.8)
 
-        page.insert_text(
-            fitz.Point(x_num, baseline),
-            page_num,
-            fontname=font,
-            fontsize=size,
-            color=color,
-            overlay=True,
-        )
+        _draw_text(page, fitz.Point(x_num, baseline), page_num, font, size, color, faux_bold=faux_bold)
 
         title_size = _fit_fontsize_for_width(title, font, size, max(5.0, (x_num - rect.x0) * 0.72))
         title_w = fitz.get_text_length(title, fontname=font, fontsize=title_size)
@@ -164,23 +164,9 @@ def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, siz
             dot_w = max(1.0, fitz.get_text_length(".", fontname=font, fontsize=size))
             dot_count = int((dots_end - dots_start) / dot_w)
             if dot_count > 2:
-                page.insert_text(
-                    fitz.Point(dots_start, baseline),
-                    "." * dot_count,
-                    fontname=font,
-                    fontsize=size,
-                    color=color,
-                    overlay=True,
-                )
+                _draw_text(page, fitz.Point(dots_start, baseline), "." * dot_count, font, size, color, faux_bold=faux_bold)
 
-        page.insert_text(
-            fitz.Point(rect.x0, baseline),
-            title,
-            fontname=font,
-            fontsize=title_size,
-            color=color,
-            overlay=True,
-        )
+        _draw_text(page, fitz.Point(rect.x0, baseline), title, font, title_size, color, faux_bold=faux_bold)
         return True
     except Exception as exc:  # noqa: BLE001
         logger.debug("TOC render fallback failed: %s", exc)
@@ -192,26 +178,21 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
     base_size = span.size
     color = _int_to_rgb(span.color)
 
+    emphasis = _looks_like_section_heading(text) or _looks_like_footer_emphasis(text)
+
     for font in candidate_fonts:
         size_fit = _fit_fontsize_for_width(text, font, base_size, max(5.0, rect.width - 1))
         candidate_sizes = [size_fit, max(5.0, size_fit - 0.5), max(5.0, size_fit - 1.0)]
 
         for size in candidate_sizes:
-            if _render_toc_line(page, rect, text, font, size, color):
+            if _render_toc_line(page, rect, text, font, size, color, faux_bold=emphasis):
                 return True
 
             # For large headings, force single-line baseline render first to avoid overlap with underline.
             if span.size >= 16:
                 try:
                     baseline = fitz.Point(rect.x0, rect.y0 + max(size * 0.95, rect.height * 0.7))
-                    page.insert_text(
-                        baseline,
-                        text,
-                        fontname=font,
-                        fontsize=size,
-                        color=color,
-                        overlay=True,
-                    )
+                    _draw_text(page, baseline, text, font, size, color, faux_bold=emphasis)
                     return True
                 except Exception:
                     pass
@@ -233,14 +214,7 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
 
             try:
                 baseline = fitz.Point(rect.x0, rect.y0 + max(size * 0.95, rect.height * 0.78))
-                page.insert_text(
-                    baseline,
-                    text,
-                    fontname=font,
-                    fontsize=size,
-                    color=color,
-                    overlay=True,
-                )
+                _draw_text(page, baseline, text, font, size, color, faux_bold=emphasis)
                 return True
             except Exception:
                 pass
@@ -282,13 +256,14 @@ def translate_pdf(pdf_bytes: bytes, target_language: str, max_pages: Optional[in
                 )
 
     output_doc = fitz.open()
-    for page_no in range(source_doc.page_count):
+    output_pages = page_limit if page_limit is not None else source_doc.page_count
+    for page_no in range(output_pages):
         src_page = source_doc[page_no]
         dst_page = output_doc.new_page(width=src_page.rect.width, height=src_page.rect.height)
         dst_page.show_pdf_page(dst_page.rect, source_doc, page_no)
 
     for i, span in enumerate(spans):
-        if page_limit is not None and span.page_number >= page_limit:
+        if span.page_number >= output_pages:
             continue
 
         page = output_doc[span.page_number]

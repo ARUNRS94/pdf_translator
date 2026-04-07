@@ -20,7 +20,7 @@ End-to-end flow:
    Pages are cloned, source text regions are redacted, and translated text is inserted into original bounding boxes.
 7. **Output Generation**  
    API returns translated PDF bytes for download in Streamlit.
-   Optional `max_pages` limit supports fast testing by translating only the first N pages.
+   Optional `max_pages` limit supports fast testing by translating and generating only the first N pages.
 
 ## Key behaviors implemented
 
@@ -57,7 +57,7 @@ pip install -r requirements.txt
 python api.py
 streamlit run streamlit_app.py
 
-Use the **Max pages to translate (testing)** field in Streamlit (or `max_pages` form field in API) to limit translation scope during test runs.
+Use the **Max pages to translate (testing)** field in Streamlit (or `max_pages` form field in API) to limit translation scope; output PDF will contain only those first N pages.
 ```
 
 ## Notes on formatting fidelity
