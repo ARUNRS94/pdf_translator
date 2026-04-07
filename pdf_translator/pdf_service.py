@@ -84,15 +84,23 @@ def _validate_max_pages(max_pages: Optional[int], total_pages: int) -> Optional[
         raise PDFTranslationError("max_pages must be greater than 0")
     return min(max_pages, total_pages)
 
+
 def _looks_like_section_heading(text: str) -> bool:
     t = text.strip()
     return bool(re.match(r"^\d+(\.\d+)*\s+", t))
 
 
+def _looks_like_footer_emphasis(text: str) -> bool:
+    t = text.strip().lower()
+    return bool(re.search(r"\brev\.?\b|\brév\.?\b", t))
+
+
 def _font_candidates(span: TextSpan, text: str) -> list[str]:
     name = (span.font or "").lower()
-    bold = ("bold" in name) or bool(span.flags & 16) or _looks_like_section_heading(text)
+    strong_name = any(k in name for k in ["bold", "black", "semibold", "demi"])
+    emphasis = _looks_like_section_heading(text) or _looks_like_footer_emphasis(text)
 
+    bold = strong_name or bool(span.flags & 16) or emphasis
     italic = ("italic" in name or "oblique" in name) or bool(span.flags & 2)
 
     styled = "helv"
@@ -103,8 +111,10 @@ def _font_candidates(span: TextSpan, text: str) -> list[str]:
     elif italic:
         styled = "helvI"
 
+    preferred = [styled, span.font, "helvB", "helv"] if bold else [span.font, styled, "helv"]
+
     out = []
-    for f in [span.font, styled, "helv"]:
+    for f in preferred:
         if f and f not in out:
             out.append(f)
     return out
@@ -122,6 +132,7 @@ def _fit_fontsize_for_width(text: str, font: str, preferred_size: float, max_wid
         return max(5.0, min(preferred_size, fitted))
     except Exception:
         return preferred_size
+
 
 def _render_toc_line(page: fitz.Page, rect: fitz.Rect, text: str, font: str, size: float, color: tuple[float, float, float]) -> bool:
     m = re.match(r"^(.*?)(\.{3,})(\s*\d+)\s*$", text)
@@ -184,6 +195,7 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
     for font in candidate_fonts:
         size_fit = _fit_fontsize_for_width(text, font, base_size, max(5.0, rect.width - 1))
         candidate_sizes = [size_fit, max(5.0, size_fit - 0.5), max(5.0, size_fit - 1.0)]
+
         for size in candidate_sizes:
             if _render_toc_line(page, rect, text, font, size, color):
                 return True
