@@ -99,7 +99,7 @@ def _font_candidates(span: TextSpan) -> list[str]:
         styled = "helvI"
 
     out = []
-    for f in [span.font, styled, "helv"]:
+    for f in [span.font, styled, "helvB", "helv"]:
         if f and f not in out:
             out.append(f)
     return out
@@ -183,7 +183,7 @@ def _render_span_text(page: fitz.Page, rect: fitz.Rect, text: str, span: TextSpa
                 logger.debug("Textbox render failed (font=%s size=%s): %s", font, size, exc)
 
             try:
-                baseline = fitz.Point(rect.x0, rect.y1 - max(0.5, rect.height * 0.2))
+                baseline = fitz.Point(rect.x0, rect.y0 + max(size, rect.height * 0.8))
                 page.insert_text(
                     baseline,
                     text,

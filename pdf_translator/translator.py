@@ -83,7 +83,8 @@ def translate_lines(lines: List[str], target_language: str) -> List[str]:
                 temperature=0,
             )
             parsed = _parse_translation_json(raw, len(lines))
-            return [_apply_source_format_guards(src, out) for src, out in zip(lines, parsed)]
+            guarded = [_apply_source_format_guards(src, out) for src, out in zip(lines, parsed)]
+            return [_normalize_month_names(v, target_language) for v in guarded]
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             logger.warning("Translation attempt %s/%s failed: %s", attempt, config.MAX_RETRIES, exc)
@@ -114,6 +115,31 @@ def _apply_source_format_guards(source: str, translated: str) -> str:
     if re.fullmatch(r"[\d\W_]+", src):
         return src
 
+    return out
+
+
+def _normalize_month_names(text: str, target_language: str) -> str:
+    if target_language.strip().lower() != "french":
+        return text
+
+    month_map = {
+        "january": "janvier",
+        "february": "février",
+        "march": "mars",
+        "april": "avril",
+        "may": "mai",
+        "june": "juin",
+        "july": "juillet",
+        "august": "août",
+        "september": "septembre",
+        "october": "octobre",
+        "november": "novembre",
+        "december": "décembre",
+    }
+
+    out = text
+    for en, fr in month_map.items():
+        out = re.sub(rf"\b{en}\b", fr, out, flags=re.IGNORECASE)
     return out
 
 
