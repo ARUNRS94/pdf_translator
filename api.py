@@ -27,13 +27,19 @@ def translate_endpoint():
 
     uploaded = request.files["file"]
     target_language = request.form.get("target_language", "French")
+    max_pages_raw = request.form.get("max_pages")
 
     if not uploaded.filename.lower().endswith(".pdf"):
         return jsonify({"error": "Only PDF files are supported"}), 400
 
     try:
+        max_pages = int(max_pages_raw) if max_pages_raw else None
+    except ValueError:
+        return jsonify({"error": "max_pages must be an integer"}), 400
+
+    try:
         input_bytes = uploaded.read()
-        output_bytes = translate_pdf(input_bytes, target_language)
+        output_bytes = translate_pdf(input_bytes, target_language, max_pages=max_pages)
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         Path(tmp.name).write_bytes(output_bytes)

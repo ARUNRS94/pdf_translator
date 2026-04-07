@@ -1,6 +1,5 @@
-import io
 import logging
-from typing import List
+from typing import List, Optional
 
 import fitz
 
@@ -77,27 +76,46 @@ def _validate_length_ratio(source: str, translated: str, low: float = 0.25, high
     return low <= ratio <= high
 
 
-def translate_pdf(pdf_bytes: bytes, target_language: str) -> bytes:
-    spans, source_doc = extract_text_spans(pdf_bytes)
-    if not spans:
-        raise PDFTranslationError("No extractable text found in PDF")
+def _validate_max_pages(max_pages: Optional[int], total_pages: int) -> Optional[int]:
+    if max_pages is None:
+        return None
+    if max_pages <= 0:
+        raise PDFTranslationError("max_pages must be greater than 0")
+    return min(max_pages, total_pages)
 
-    translated_text = [s.text for s in spans]
-    for chunk_indexes in _chunk_spans(spans):
-        source_lines = [spans[i].text for i in chunk_indexes]
+
+def translate_pdf(pdf_bytes: bytes, target_language: str, max_pages: Optional[int] = None) -> bytes:
+    spans, source_doc = extract_text_spans(pdf_bytes)
+    page_limit = _validate_max_pages(max_pages, source_doc.page_count)
+
+    if page_limit is None:
+        spans_to_translate = spans
+    else:
+        spans_to_translate = [s for s in spans if s.page_number < page_limit]
+
+    if not spans_to_translate:
+        raise PDFTranslationError("No extractable text found in selected page range")
+
+    translated_by_index = {i: span.text for i, span in enumerate(spans)}
+    index_map = [i for i, s in enumerate(spans) if (page_limit is None or s.page_number < page_limit)]
+
+    selected_spans = [spans[i] for i in index_map]
+    for chunk_indexes in _chunk_spans(selected_spans):
+        source_lines = [selected_spans[i].text for i in chunk_indexes]
         out_lines = translate_lines(source_lines, target_language)
-        for offset, idx in enumerate(chunk_indexes):
-            src = spans[idx].text
+
+        for offset, local_idx in enumerate(chunk_indexes):
+            global_idx = index_map[local_idx]
+            src = selected_spans[local_idx].text
             candidate = out_lines[offset]
             if _validate_length_ratio(src, candidate):
-                translated_text[idx] = candidate
+                translated_by_index[global_idx] = candidate
             else:
                 logger.warning(
                     "Length validation failed on page %s span %s; using original text.",
-                    spans[idx].page_number,
-                    idx,
+                    selected_spans[local_idx].page_number,
+                    global_idx,
                 )
-                translated_text[idx] = src
 
     output_doc = fitz.open()
     for page_no in range(source_doc.page_count):
@@ -106,16 +124,18 @@ def translate_pdf(pdf_bytes: bytes, target_language: str) -> bytes:
         dst_page.show_pdf_page(dst_page.rect, source_doc, page_no)
 
     for i, span in enumerate(spans):
+        if page_limit is not None and span.page_number >= page_limit:
+            continue
+
         page = output_doc[span.page_number]
         rect = fitz.Rect(span.bbox)
-
         page.add_redact_annot(rect, fill=(1, 1, 1))
         page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
         try:
             page.insert_textbox(
                 rect,
-                translated_text[i],
+                translated_by_index[i],
                 fontname=span.font,
                 fontsize=span.size,
                 color=_int_to_rgb(span.color),

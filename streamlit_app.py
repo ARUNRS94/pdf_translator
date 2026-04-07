@@ -21,6 +21,13 @@ langs = [
     "Chinese (Simplified)",
 ]
 target_language = st.selectbox("Target language", options=langs, index=0)
+max_pages = st.number_input(
+    "Max pages to translate (testing)",
+    min_value=1,
+    value=10,
+    step=1,
+    help="Only first N pages are translated; remaining pages are kept unchanged.",
+)
 uploaded = st.file_uploader("Upload PDF", type=["pdf"])
 
 if st.button("Translate", type="primary", disabled=uploaded is None):
@@ -29,7 +36,7 @@ if st.button("Translate", type="primary", disabled=uploaded is None):
     else:
         with st.spinner("Translating PDF. This may take time for 300+ pages..."):
             files = {"file": (uploaded.name, uploaded.getvalue(), "application/pdf")}
-            data = {"target_language": target_language}
+            data = {"target_language": target_language, "max_pages": str(max_pages)}
 
             try:
                 resp = requests.post(f"{API_BASE_URL}/translate", files=files, data=data, timeout=1800)
